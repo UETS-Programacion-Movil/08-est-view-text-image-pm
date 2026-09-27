@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Semana 08 UETS",
+    "slug": "semana-08-view-text-image",
+    "scheme": "semanauets08",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "splash": {
+      "backgroundColor": "#0F172A"
+    }
+  }
+}

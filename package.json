@@ -1,0 +1,30 @@
+{
+  "name": "08-est-view-text-image-pm",
+  "version": "1.0.0",
+  "description": "Semana 08 PM | View Text Image y Flexbox | Codespaces",
+  "main": "app/index.tsx",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/0801_estilos.test.mjs tests/0802_layout.test.mjs",
+    "test:0801": "node --test tests/0801_estilos.test.mjs",
+    "test:0802": "node --test tests/0802_layout.test.mjs",
+    "check": "node scripts/check-componentes.mjs",
+    "start": "expo start --tunnel"
+  },
+  "keywords": [
+    "expo",
+    "react-native",
+    "flexbox",
+    "stylesheet",
+    "uets",
+    "bachillerato-tecnico",
+    "mobile-development"
+  ],
+  "author": "Ing. Milton Velasquez <UETS>",
+  "license": "MIT",
+  "dependencies": {
+    "expo": "~52.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.5"
+  }
+}

@@ -1,0 +1,203 @@
+name: "Autograding"
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  evaluate:
+    name: "Autograding and Integrity Guard"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout del Codigo"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "Setup pnpm"
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.4.1
+
+      - name: "Setup Node.js"
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: "Instalar Dependencias"
+        run: pnpm install --no-frozen-lockfile
+
+      # -----------------------------------------------------------------------
+      # 1. FILE INTEGRITY GUARD (Anti-Tampering)
+      # -----------------------------------------------------------------------
+      - name: "File Integrity Guard"
+        id: file_guard
+        run: |
+          echo "Verificando integridad de archivos modificados..."
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+          echo "Archivos modificados en este PR:"
+          echo "$CHANGED_FILES"
+
+          UNAUTHORIZED_FILES=""
+          for file in $CHANGED_FILES; do
+            case "$file" in
+              app/index.tsx|src/0801_view_text_image.tsx|src/0802_flexbox_layout.tsx|src/0801_estilos.js|src/0802_layout.js|README.md)
+                ;;
+              *)
+                UNAUTHORIZED_FILES="$UNAUTHORIZED_FILES $file"
+                ;;
+            esac
+          done
+
+          if [ -n "$UNAUTHORIZED_FILES" ]; then
+            echo "Archivos no autorizados detectados:$UNAUTHORIZED_FILES"
+            echo "status=fail" >> $GITHUB_OUTPUT
+            echo "unauthorized=$UNAUTHORIZED_FILES" >> $GITHUB_OUTPUT
+          else
+            echo "Integridad de archivos verificada con exito."
+            echo "status=pass" >> $GITHUB_OUTPUT
+          fi
+
+      # -----------------------------------------------------------------------
+      # 2. COMMIT LINTER (Conventional Commits)
+      # -----------------------------------------------------------------------
+      - name: "Commit Message Linter"
+        id: commit_lint
+        run: |
+          echo "Verificando formato de mensajes de commit..."
+          COMMITS=$(git log --format="%s" origin/main...HEAD)
+          echo "Commits en este PR:"
+          echo "$COMMITS"
+
+          INVALID_COMMITS=""
+          PATTERN="^(feat|fix|docs|style|refactor|test|chore)(\([a-zA-Z0-9_\-]+\))?: .+"
+
+          while IFS= read -r commit; do
+            if [ -n "$commit" ]; then
+              if ! [[ "$commit" =~ $PATTERN ]]; then
+                INVALID_COMMITS="$INVALID_COMMITS '$commit'"
+              fi
+            fi
+          done <<< "$COMMITS"
+
+          if [ -n "$INVALID_COMMITS" ]; then
+            echo "Commits no convencionales detectados:$INVALID_COMMITS"
+            echo "status=warn" >> $GITHUB_OUTPUT
+            echo "invalid_commits=$INVALID_COMMITS" >> $GITHUB_OUTPUT
+          else
+            echo "Todos los commits siguen el estandar Conventional Commits."
+            echo "status=pass" >> $GITHUB_OUTPUT
+          fi
+
+      # -----------------------------------------------------------------------
+      # 3. FILE GUARD DE COMPONENTES (primitivos + flexbox)
+      # -----------------------------------------------------------------------
+      - name: "Component File Guard"
+        id: component_guard
+        continue-on-error: true
+        run: |
+          npm run check
+          if [ $? -eq 0 ]; then echo "status=pass" >> $GITHUB_OUTPUT; else echo "status=fail" >> $GITHUB_OUTPUT; fi
+
+      # -----------------------------------------------------------------------
+      # 4. RETO 0801 + RETO 0802
+      # -----------------------------------------------------------------------
+      - name: "Test Reto 0801 (View Text Image)"
+        id: test_0801
+        continue-on-error: true
+        run: |
+          npm run test:0801
+          if [ $? -eq 0 ]; then echo "status=pass" >> $GITHUB_OUTPUT; else echo "status=fail" >> $GITHUB_OUTPUT; fi
+
+      - name: "Test Reto 0802 (Flexbox)"
+        id: test_0802
+        continue-on-error: true
+        run: |
+          npm run test:0802
+          if [ $? -eq 0 ]; then echo "status=pass" >> $GITHUB_OUTPUT; else echo "status=fail" >> $GITHUB_OUTPUT; fi
+
+      # -----------------------------------------------------------------------
+      # 5. GENERAR SUMMARY Y PUBLICAR COMENTARIO OFICIAL EN PR
+      # -----------------------------------------------------------------------
+      - name: "Generar Reporte de Evaluacion"
+        if: always()
+        run: |
+          FG="${{ steps.file_guard.outputs.status }}"
+          CG="${{ steps.component_guard.outputs.status }}"
+          CL="${{ steps.commit_lint.outputs.status }}"
+          T1="${{ steps.test_0801.outputs.status }}"
+          T2="${{ steps.test_0802.outputs.status }}"
+
+          FG_TEXT="No valido"; CG_TEXT="No valido"; CL_TEXT="Commits genericos (0.00)"
+          T1_TEXT="Fallo / Incompleto (0.00)"; T2_TEXT="Fallo / Incompleto (0.00)"
+          [ "$FG" = "pass" ] && FG_TEXT="Valido"
+          [ "$CG" = "pass" ] && CG_TEXT="Valido"
+          [ "$CL" = "pass" ] && CL_TEXT="Cumple Conventional Commits (+1.00)"
+          [ "$T1" = "pass" ] && T1_TEXT="Paso (+2.00)"
+          [ "$T2" = "pass" ] && T2_TEXT="Paso (+2.00)"
+
+          TOTAL=0
+          if [ "$FG" = "pass" ] && [ "$CG" = "pass" ]; then
+            [ "$CL" = "pass" ] && TOTAL=$((TOTAL + 100))
+            [ "$T1" = "pass" ] && TOTAL=$((TOTAL + 200))
+            [ "$T2" = "pass" ] && TOTAL=$((TOTAL + 200))
+          fi
+
+          INTEGER_PART=$((TOTAL / 100))
+          DECIMAL_PART=$((TOTAL % 100))
+          printf -v FORMATTED_SCORE "%d.%02d" $INTEGER_PART $DECIMAL_PART
+
+          echo "### UETS Autograding Bot — Resultado de Evaluacion (Semana 8)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Verificacion / Reto Evaluado | Estado | Puntaje Bloque A |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :---: | :---: |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integridad de Archivos (File Guard) | $FG_TEXT | — |" >> $GITHUB_STEP_SUMMARY
+          echo "| Componentes: primitivos y Flexbox (Component Guard) | $CG_TEXT | — |" >> $GITHUB_STEP_SUMMARY
+          echo "| Estandar de Commits (Conventional) | $CL_TEXT | $([ "$CL" = "pass" ] && echo "1.00" || echo "0.00") / 1.00 pts |" >> $GITHUB_STEP_SUMMARY
+          echo "| Reto 0801: View, Text, Image + StyleSheet | $T1_TEXT | $([ "$T1" = "pass" ] && echo "2.00" || echo "0.00") / 2.00 pts |" >> $GITHUB_STEP_SUMMARY
+          echo "| Reto 0802: Layout con Flexbox | $T2_TEXT | $([ "$T2" = "pass" ] && echo "2.00" || echo "0.00") / 2.00 pts |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Puntaje Preliminar Bloque A (Codigo en GitHub): **$FORMATTED_SCORE / 5.00 Puntos**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Tu docente **Ing. Milton Velasquez** revisara tu **Screencast (Bloque B - 5.0 pts)** enlazado en la descripcion del PR para tu calificacion sobre **10.0 puntos**." >> $GITHUB_STEP_SUMMARY
+
+      - name: "Publicar Comentario en el PR"
+        uses: actions/github-script@v7
+        if: always() && github.event_name == 'pull_request'
+        env:
+          STATUS_FG: ${{ steps.file_guard.outputs.status }}
+          STATUS_CG: ${{ steps.component_guard.outputs.status }}
+          STATUS_CL: ${{ steps.commit_lint.outputs.status }}
+          STATUS_T1: ${{ steps.test_0801.outputs.status }}
+          STATUS_T2: ${{ steps.test_0802.outputs.status }}
+        with:
+          script: |
+            try {
+              const fg = process.env.STATUS_FG;
+              const cg = process.env.STATUS_CG;
+              const cl = process.env.STATUS_CL;
+              const t1 = process.env.STATUS_T1;
+              const t2 = process.env.STATUS_T2;
+
+              let score = 0.0;
+              if (fg === "pass" && cg === "pass") {
+                if (cl === "pass") score += 1.00;
+                if (t1 === "pass") score += 2.00;
+                if (t2 === "pass") score += 2.00;
+              }
+
+              const prNumber = context.payload.pull_request ? context.payload.pull_request.number : context.issue.number;
+              const authorLogin = context.payload.pull_request ? context.payload.pull_request.user.login : "estudiante";
+
+              const body = `### UETS Autograding Bot — Resultado de Evaluacion (Semana 8)\n\nHola @${authorLogin}, tu entrega ha sido evaluada automaticamente:\n\n| Verificacion / Reto Evaluado | Estado | Puntaje Bloque A |\n| :--- | :---: | :---: |\n| Integridad de Archivos (File Guard) | ${fg === "pass" ? "Valido" : "No valido"} | — |\n| Componentes: primitivos y Flexbox (Component Guard) | ${cg === "pass" ? "Valido" : "No valido"} | — |\n| Estandar de Commits (Conventional) | ${cl === "pass" ? "Cumple (+1.00)" : "Genericos (0.00)"} | ${cl === "pass" ? "1.00" : "0.00"} / 1.00 pts |\n| Reto 0801: View, Text, Image + StyleSheet | ${t1 === "pass" ? "Paso (+2.00)" : "Fallo (0.00)"} | ${t1 === "pass" ? "2.00" : "0.00"} / 2.00 pts |\n| Reto 0802: Layout con Flexbox | ${t2 === "pass" ? "Paso (+2.00)" : "Fallo (0.00)"} | ${t2 === "pass" ? "2.00" : "0.00"} / 2.00 pts |\n\n---\n\n### Puntaje Preliminar Bloque A (Codigo en GitHub): **${score.toFixed(2)} / 5.00 Puntos**\n\n> Tu docente **Ing. Milton Velasquez** revisara tu **Screencast (Bloque B - 5.0 pts)** enlazado en la descripcion del PR para tu calificacion sobre **10.0 puntos**.`;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: body
+              });
+              console.log("Comentario publicado exitosamente en el PR #" + prNumber);
+            } catch (err) {
+              console.error("Error al publicar comentario:", err.message);
+            }

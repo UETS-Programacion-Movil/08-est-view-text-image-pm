@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+dist/
+.DS_Store
+Thumbs.db
+*.log
+.eval_sandbox/
+.vscode/
+.idea/
